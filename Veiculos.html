@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Cadastro de Veículos</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; background: #f1f5f9; padding: 20px; }
+h1 { text-align: center; }
+
+.card { background: #fff; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+label { display: block; margin-top: 8px; font-weight: bold; }
+input, select { width: 100%; padding: 8px; margin-top: 3px; }
+button { margin-top: 10px; padding: 6px 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+thead input { width: 100%; padding: 4px; font-size: 11px; }
+
+.drag-handle { cursor: grab; font-size: 18px; user-select: none; }
+.drag-handle:active { cursor: grabbing; }
+
+.status-vencido { background:#fee2e2; }
+.status-vencendo { background:#fef3c7; }
+.status-emdia { background:#dcfce7; }
+
+td.acoes { display: flex; justify-content: center; gap: 5px; }
+</style>
+</head>
+
+<body>
+
+<h1>Cadastro de Veículos</h1>
+
+<div class="card">
+<form id="formVeiculo">
+<input type="hidden" id="indiceEdicao">
+
+<label>Tipo</label>
+<select id="tipo">
+<option>Carro</option>
+<option>Moto</option>
+<option>Caminhão</option>
+<option>Reboque</option>
+<option>Semirreboque</option>
+</select>
+
+<label>Placa</label>
+<input id="placa" required>
+
+<label>Modelo</label>
+<input id="modelo">
+
+<label>Ano / Modelo</label>
+<input id="anoModelo" placeholder="2023/2024">
+
+<label>Chassi</label>
+<input id="chassi">
+
+<label>Cor</label>
+<input id="cor">
+
+<label>Proprietário</label>
+<input id="proprietario">
+
+<label>RENAVAM</label>
+<input id="renavam">
+
+<label>TARA (KG)</label>
+<input id="tara" placeholder="Ex: 8.500">
+
+<button type="submit">Salvar</button>
+</form>
+</div>
+
+<div class="card">
+<input type="file" accept=".xlsx" onchange="importarXLSX(this)">
+<button onclick="imprimirFiltrados()">🖨️ Imprimir / Exportar somente filtrados</button>
+</div>
+
+<div class="card">
+<table>
+<thead>
+<tr>
+<th>☰</th>
+<th>Tipo</th>
+<th>Placa</th>
+<th>Modelo</th>
+<th>Ano/Modelo</th>
+<th>Chassi</th>
+<th>Cor</th>
+<th>Proprietário</th>
+<th>RENAVAM</th>
+<th>TARA (KG)</th>
+<th>Licenciamento</th>
+<th>Status</th>
+<th>Última Renovação</th>
+<th>Ações</th>
+</tr>
+
+<tr>
+<th></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th><input oninput="filtrar()"></th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+
+<tbody id="lista"></tbody>
+</table>
+</div>
+
+<script>
+const STORAGE="veiculos";
+let dragIndex=null;
+
+const getLista=()=>JSON.parse(localStorage.getItem(STORAGE))||[];
+const salvarLista=l=>localStorage.setItem(STORAGE,JSON.stringify(l));
+
+const formatarTara=v=>v?Number(v).toLocaleString("pt-BR"):"";
+
+const mesLic=p=>{
+    let f=p.slice(-1);
+    return "12".includes(f)?7:
+           "34".includes(f)?8:
+           "56".includes(f)?9:
+           "78".includes(f)?10:
+           f=="9"?11:12;
+};
+
+const ultimoDiaLic=(m,ano)=>{
+    let y = ano || new Date().getFullYear();
+    return new Date(y, m, 0).toLocaleDateString("pt-BR");
+};
+
+const statusMes=(m,ano)=>{
+    let a = new Date().getMonth()+1;
+    let y = new Date().getFullYear();
+    if(ano && ano > y) return ["EM DIA","status-emdia"];
+    return m < a?["VENCIDO","status-vencido"]:
+           m === a?["VENCE ESTE MÊS","status-vencendo"]:
+           ["EM DIA","status-emdia"];
+};
+
+formVeiculo.onsubmit=e=>{
+    e.preventDefault();
+    let l=getLista(),i=indiceEdicao.value;
+
+    let v={
+        tipo:tipo.value,
+        placa:placa.value.toUpperCase(),
+        modelo:modelo.value,
+        anoModelo:anoModelo.value,
+        chassi:chassi.value,
+        cor:cor.value,
+        proprietario:proprietario.value,
+        renavam:renavam.value,
+        tara:tara.value.replace(/\D/g,""),
+        ultimaRenovacao: "",
+        licenciamentoAno: new Date().getFullYear()
+    };
+
+    i===""?l.push(v):l[i]=v;
+    salvarLista(l);
+    e.target.reset();
+    indiceEdicao.value="";
+    listar();
+};
+
+function listar(){
+    lista.innerHTML="";
+    let hojeMes = new Date().getMonth() + 1;
+    let hojeAno = new Date().getFullYear();
+
+    getLista().forEach((v,i)=>{
+        let m=mesLic(v.placa);
+        let anoLic = v.licenciamentoAno || hojeAno;
+        let [t,c] = statusMes(m,anoLic);
+
+        // Alerta visual se vence este mês
+        let alertaVisual = (t === "VENCE ESTE MÊS") ? 'style="border:2px solid orange"' : '';
+
+        let statusHTML = t === "VENCIDO" ? `<button onclick="renovar(${i})">Renovar</button>` : t;
+
+        lista.innerHTML+=`
+        <tr data-index="${i}" ${alertaVisual}>
+            <td><span class="drag-handle" draggable="true">☰</span></td>
+            <td>${v.tipo}</td>
+            <td>${v.placa}</td>
+            <td>${v.modelo}</td>
+            <td>${v.anoModelo}</td>
+            <td>${v.chassi}</td>
+            <td>${v.cor}</td>
+            <td>${v.proprietario}</td>
+            <td>${v.renavam}</td>
+            <td>${formatarTara(v.tara)}</td>
+            <td>${ultimoDiaLic(m,anoLic)}</td>
+            <td class="${c}">${statusHTML}</td>
+            <td>${v.ultimaRenovacao || ""}</td>
+            <td class="acoes">
+                <button onclick="editar(${i})">Editar</button>
+                <button onclick="excluir(${i})">Excluir</button>
+            </td>
+        </tr>`;
+    });
+    ativarDrag();
+}
+
+function ativarDrag(){
+    document.querySelectorAll(".drag-handle").forEach(h=>{
+        h.addEventListener("dragstart",()=>{
+            dragIndex=+h.closest("tr").dataset.index;
+            h.closest("tr").style.opacity="0.4";
+        });
+        h.addEventListener("dragend",()=>{
+            h.closest("tr").style.opacity="";
+        });
+    });
+
+    document.querySelectorAll("#lista tr").forEach(tr=>{
+        tr.addEventListener("dragover",e=>e.preventDefault());
+        tr.addEventListener("drop",e=>{
+            e.preventDefault();
+            let dropIndex=+tr.dataset.index;
+            if(dragIndex===null||dragIndex===dropIndex)return;
+            let l=getLista();
+            let item=l.splice(dragIndex,1)[0];
+            l.splice(dropIndex,0,item);
+            salvarLista(l);
+            listar();
+        });
+    });
+}
+
+function filtrar(){
+    let f=document.querySelectorAll("thead tr:nth-child(2) input");
+    document.querySelectorAll("#lista tr").forEach(tr=>{
+        let ok=true;
+        f.forEach((i,n)=>{
+            if(i.value && !tr.children[n+1].innerText.toUpperCase().includes(i.value.toUpperCase()))
+                ok=false;
+        });
+        tr.style.display=ok?"":"none";
+    });
+}
+
+function imprimirFiltrados(){
+    let linhas=[...document.querySelectorAll("#lista tr")].filter(l=>l.style.display!=="none");
+    if(!linhas.length) return alert("Nenhum registro filtrado.");
+
+    let h=`<html><body><h2>Veículos Filtrados</h2>
+    <table border="1" width="100%">
+    <tr>
+        <th>Tipo</th><th>Placa</th><th>Modelo</th><th>Ano/Modelo</th>
+        <th>Chassi</th><th>Proprietário</th><th>RENAVAM</th>
+        <th>TARA</th><th>Licenciamento</th><th>Status</th><th>Última Renovação</th>
+    </tr>`;
+
+    linhas.forEach(l=>{
+        let c=l.children;
+        h+=`<tr>
+            <td>${c[1].innerText}</td>
+            <td>${c[2].innerText}</td>
+            <td>${c[3].innerText}</td>
+            <td>${c[4].innerText}</td>
+            <td>${c[5].innerText}</td>
+            <td>${c[7].innerText}</td>
+            <td>${c[8].innerText}</td>
+            <td>${c[9].innerText}</td>
+            <td>${c[10].innerText}</td>
+            <td>${c[11].innerText}</td>
+            <td>${c[12].innerText}</td>
+        </tr>`;
+    });
+
+    h+=`</table><script>print()<\/script></body></html>`;
+    let w=window.open();
+    w.document.write(h);
+    w.document.close();
+}
+
+function editar(i){
+    let v=getLista()[i];
+    Object.keys(v).forEach(k=>{
+        if(document.getElementById(k)) document.getElementById(k).value=v[k];
+    });
+    indiceEdicao.value=i;
+    scrollTo(0,0);
+}
+
+function excluir(i){
+    if(confirm("Excluir veículo?")){
+        let l=getLista();
+        l.splice(i,1);
+        salvarLista(l);
+        listar();
+    }
+}
+
+// Renovar licenciamento
+function renovar(i){
+    let l=getLista();
+    let v=l[i];
+    let nextYear = (v.licenciamentoAno || new Date().getFullYear()) + 1;
+    v.licenciamentoAno = nextYear;
+    v.ultimaRenovacao = new Date().toLocaleDateString("pt-BR");
+    salvarLista(l);
+    listar();
+    alert(`Licenciamento do veículo ${v.placa} renovado para ${nextYear}!`);
+}
+
+// Importar XLSX
+function importarXLSX(input){
+    let r=new FileReader();
+    r.onload=e=>{
+        let wb=XLSX.read(e.target.result,{type:"binary"});
+        let sheet=wb.Sheets[wb.SheetNames[0]];
+        let dados=XLSX.utils.sheet_to_json(sheet,{header:1});
+        let l=getLista();
+
+        dados.slice(1).forEach(row=>{
+            if(!row[1]) return;
+            l.push({
+                tipo:row[0]||"",
+                placa:String(row[1]).toUpperCase(),
+                modelo:row[2]||"",
+                anoModelo:row[3]||"",
+                chassi:row[4]||"",
+                cor:row[5]||"",
+                proprietario:row[6]||"",
+                renavam:row[7]||"",
+                tara:String(row[8]||"").replace(/\D/g,""),
+                ultimaRenovacao: "",
+                licenciamentoAno: new Date().getFullYear()
+            });
+        });
+
+        salvarLista(l);
+        listar();
+    };
+    r.readAsBinaryString(input.files[0]);
+}
+
+listar();
+</script>
+
+</body>
+</html>
