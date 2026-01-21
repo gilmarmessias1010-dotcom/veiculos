@@ -16,7 +16,6 @@ input, select { width: 100%; padding: 8px; margin-top: 3px; }
 button { margin-top: 10px; padding: 6px 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
-thead input { width: 100%; padding: 4px; font-size: 11px; }
 .status-vencido { background:#fee2e2; }
 .status-vencendo { background:#fef3c7; }
 .status-emdia { background:#dcfce7; }
@@ -71,7 +70,6 @@ td.acoes { display:flex; gap:5px; justify-content:center; }
 
 <div class="card">
 <input type="file" accept=".xlsx" onchange="importarXLSX(this)">
-<button onclick="imprimirFiltrados()">🖨️ Imprimir filtrados</button>
 </div>
 
 <div class="card">
@@ -79,8 +77,8 @@ td.acoes { display:flex; gap:5px; justify-content:center; }
 <thead>
 <tr>
 <th>Tipo</th><th>Placa</th><th>Modelo</th><th>Ano/Modelo</th>
-<th>Chassi</th><th>Cor</th><th>Proprietário</th><th>RENAVAM</th>
-<th>TARA</th><th>Status</th><th>Ações</th>
+<th>Chassi</th><th>Cor</th><th>Proprietário</th>
+<th>RENAVAM</th><th>TARA</th><th>Status</th><th>Ações</th>
 </tr>
 </thead>
 <tbody id="lista"></tbody>
@@ -94,16 +92,13 @@ import {
   getDocs, deleteDoc, updateDoc, doc
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-/* 🔴 COLE AQUI OS DADOS DO SEU FIREBASE */
+/* 🔴 SEUS DADOS DO FIREBASE */
 const firebaseConfig = {
   apiKey: "SUA_API_KEY",
   authDomain: "SEU_PROJETO.firebaseapp.com",
-  projectId: "SEU_PROJETO",
-  storageBucket: "SEU_PROJETO.appspot.com",
-  messagingSenderId: "SEU_SENDER_ID",
-  appId: "SEU_APP_ID"
+  projectId: "SEU_PROJETO"
 };
-/* =============================== */
+/* ======================= */
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -127,7 +122,6 @@ window.onload = carregar;
 
 formVeiculo.onsubmit = async e => {
   e.preventDefault();
-  let id = docId.value;
 
   let dados = {
     tipo: tipo.value,
@@ -141,8 +135,8 @@ formVeiculo.onsubmit = async e => {
     tara: tara.value.replace(/\D/g,"")
   };
 
-  id
-    ? await updateDoc(doc(db,"veiculos",id),dados)
+  docId.value
+    ? await updateDoc(doc(db,"veiculos",docId.value),dados)
     : await addDoc(col,dados);
 
   formVeiculo.reset();
@@ -178,7 +172,6 @@ window.editar = id => {
   let v = veiculos.find(x=>x.id===id);
   Object.keys(v).forEach(k=>document.getElementById(k)?.value=v[k]);
   docId.value=id;
-  scrollTo(0,0);
 };
 
 window.excluir = async id => {
@@ -188,28 +181,30 @@ window.excluir = async id => {
   }
 };
 
-window.importarXLSX = input => {
-  let r=new FileReader();
-  r.onload=e=>{
-    let wb=XLSX.read(e.target.result,{type:"binary"});
-    let sh=wb.Sheets[wb.SheetNames[0]];
-    let rows=XLSX.utils.sheet_to_json(sh,{header:1});
-    rows.slice(1).forEach(row=>{
-      if(row[1]) addDoc(col,{
-        tipo:row[0]||"",
-        placa:String(row[1]).toUpperCase(),
-        modelo:row[2]||"",
-        anoModelo:row[3]||"",
-        chassi:row[4]||"",
-        cor:row[5]||"",
-        proprietario:row[6]||"",
-        renavam:row[7]||"",
-        tara:String(row[8]||"").replace(/\D/g,"")
-      });
+window.importarXLSX = async input => {
+  const file = input.files[0];
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data);
+  const sh = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sh,{header:1});
+
+  const promessas = rows.slice(1).map(r=>{
+    if(!r[1]) return null;
+    return addDoc(col,{
+      tipo:r[0]||"",
+      placa:String(r[1]).toUpperCase(),
+      modelo:r[2]||"",
+      anoModelo:r[3]||"",
+      chassi:r[4]||"",
+      cor:r[5]||"",
+      proprietario:r[6]||"",
+      renavam:r[7]||"",
+      tara:String(r[8]||"").replace(/\D/g,"")
     });
-    setTimeout(carregar,1000);
-  };
-  r.readAsBinaryString(input.files[0]);
+  }).filter(Boolean);
+
+  await Promise.all(promessas);
+  carregar();
 };
 </script>
 
